@@ -11,9 +11,6 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "portfolio:rebuild": "ts-node src/infrastructure/database/rebuild-portfolio-state.ts",
-    "portfolio:verify": "ts-node src/infrastructure/database/rebuild-portfolio-state.ts --verify",
-    "portfolio:benchmark": "ts-node src/infrastructure/database/rebuild-portfolio-state.ts --benchmark",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
