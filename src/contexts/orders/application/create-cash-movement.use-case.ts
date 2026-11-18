@@ -2,7 +2,8 @@ import {
   ApplicationError,
   ApplicationErrorCode,
 } from '../../shared-kernel/application/application-error';
-import { calculateAccountLedger } from '../../shared-kernel/domain/account-ledger';
+import { applyOrderToAccountLedger } from '../../shared-kernel/domain/account-ledger';
+import { AccountStateRepository } from '../../shared-kernel/application/ports/account-state-repository.port';
 import { toCents } from '../../shared-kernel/domain/money';
 import { InstrumentCatalog } from '../../instruments/application/ports/instrument-catalog.port';
 import { UserReader } from '../../users/application/ports/user-reader.port';
@@ -28,6 +29,7 @@ export class CreateCashMovementUseCase {
     private readonly users: UserReader,
     private readonly instruments: InstrumentCatalog,
     private readonly idempotency: IdempotencyRepository,
+    private readonly accountState: AccountStateRepository,
   ) {}
 
   execute(
@@ -86,18 +88,14 @@ export class CreateCashMovementUseCase {
     }
 
     const amountCents = toCents(command.amount);
-    const ledger = calculateAccountLedger(
-      command.userId,
-      await this.orders.findByUser(command.userId),
-      instruments,
-    );
-    const availableCashCents = ledger.cashBalanceCents - ledger.reservedCashCents;
-    const rejectionReason =
-      command.side === OrderSide.CASH_OUT && amountCents > availableCashCents
-        ? 'Insufficient available cash'
-        : undefined;
-
     return this.idempotency.saveTransactional(idempotencyRequest, async () => {
+      await this.accountState.lockUser(command.userId);
+      const ledger = await this.accountState.findByUser(command.userId, null);
+      const availableCashCents = ledger.cashBalanceCents - ledger.reservedCashCents;
+      const rejectionReason =
+        command.side === OrderSide.CASH_OUT && amountCents > availableCashCents
+          ? 'Insufficient available cash'
+          : undefined;
       const order = await this.orders.save({
         instrumentId: cashInstrument.id,
         userId: command.userId,
@@ -108,6 +106,11 @@ export class CreateCashMovementUseCase {
         type: OrderType.MARKET,
         datetime: new Date().toISOString(),
       });
+
+      if (!rejectionReason) {
+        applyOrderToAccountLedger(ledger, order, instruments);
+        await this.accountState.save(command.userId, ledger, null);
+      }
 
       return rejectionReason ? { order, rejectionReason } : { order };
     });

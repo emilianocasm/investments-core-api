@@ -6,6 +6,7 @@ import { MarketDataEntity } from '../src/contexts/market-data/adapters/outbound/
 import { OrderEntity } from '../src/contexts/orders/adapters/outbound/order.entity';
 import { OrderSide } from '../src/contexts/orders/domain/order';
 import { IdempotencyRequestEntity } from '../src/contexts/orders/adapters/outbound/idempotency-request.entity';
+import { maintainPortfolioState } from '../src/infrastructure/database/portfolio-state-maintenance';
 
 describe('Orders and cash movement endpoints', () => {
   let api: TestApiApp;
@@ -95,6 +96,7 @@ describe('Orders and cash movement endpoints', () => {
     expect(portfolio.positions).toContainEqual(
       expect.objectContaining({ instrumentId: 33, quantity: 2 }),
     );
+    await maintainPortfolioState(api.dataSource, true);
   });
 
   it('persists rejected orders for insufficient cash and insufficient shares', async () => {
@@ -168,6 +170,10 @@ describe('Orders and cash movement endpoints', () => {
     await expect(
       api.dataSource.getRepository(IdempotencyRequestEntity).count(),
     ).resolves.toBe(1);
+    await expect(
+      api.request('/portfolio/1').then((response) => response.json()),
+    ).resolves.toEqual(expect.objectContaining({ cashBalance: '754000.00' }));
+    await maintainPortfolioState(api.dataSource, true);
   });
 
   it('rejects reusing an idempotency key with a different request', async () => {
@@ -411,6 +417,7 @@ describe('Orders and cash movement endpoints', () => {
         reservedCash: '125500.00',
       }),
     );
+    await maintainPortfolioState(api.dataSource, true);
 
     const cancelAgain = await api.request(
       `/orders/${created.order.id}/cancel`,
@@ -508,6 +515,7 @@ describe('Orders and cash movement endpoints', () => {
       order: { status: string };
     };
     expect(filled.order.status).toBe('FILLED');
+    await maintainPortfolioState(api.dataSource, true);
   });
 
   it('records cash deposits and withdrawals and includes them in the portfolio balance', async () => {
@@ -547,6 +555,7 @@ describe('Orders and cash movement endpoints', () => {
         totalAccountValue: '1500.00',
       }),
     );
+    await maintainPortfolioState(api.dataSource, true);
   });
 
   it('rejects cash movements with invalid input or an unknown user', async () => {

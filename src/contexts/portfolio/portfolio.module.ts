@@ -9,18 +9,18 @@ import {
   MARKET_DATA_READER,
   MarketDataReader,
 } from '../market-data/application/ports/market-data-reader.port';
-import { OrdersModule } from '../orders/orders.module';
+import { PortfolioStateModule } from './portfolio-state.module';
 import {
-  ORDERS_REPOSITORY,
-  OrdersRepository,
-} from '../orders/application/ports/orders-repository.port';
+  ACCOUNT_STATE_REPOSITORY,
+  AccountStateRepository,
+} from '../shared-kernel/application/ports/account-state-repository.port';
 import { UsersModule } from '../users/users.module';
 import { USER_READER, UserReader } from '../users/application/ports/user-reader.port';
 import { GetPortfolioUseCase } from './application/get-portfolio.use-case';
 import { PortfolioController } from './adapters/inbound/http/portfolio.controller';
 
 @Module({
-  imports: [UsersModule, InstrumentsModule, MarketDataModule, OrdersModule],
+  imports: [UsersModule, InstrumentsModule, MarketDataModule, PortfolioStateModule],
   controllers: [PortfolioController],
   providers: [
     {
@@ -29,10 +29,15 @@ import { PortfolioController } from './adapters/inbound/http/portfolio.controlle
         users: UserReader,
         instruments: InstrumentCatalog,
         marketData: MarketDataReader,
-        orders: OrdersRepository,
+        accountState: AccountStateRepository,
       ) =>
-        new GetPortfolioUseCase(users, instruments, marketData, orders),
-      inject: [USER_READER, INSTRUMENT_CATALOG, MARKET_DATA_READER, ORDERS_REPOSITORY],
+        new GetPortfolioUseCase(users, instruments, marketData, accountState),
+      inject: [
+        USER_READER,
+        INSTRUMENT_CATALOG,
+        MARKET_DATA_READER,
+        ACCOUNT_STATE_REPOSITORY,
+      ],
     },
   ],
 })

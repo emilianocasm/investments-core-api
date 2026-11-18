@@ -6,6 +6,8 @@ import { OrderEntity } from '../../contexts/orders/adapters/outbound/order.entit
 import { InstrumentEntity } from '../../contexts/instruments/adapters/outbound/instrument.entity';
 import { UserEntity } from '../../contexts/users/adapters/outbound/user.entity';
 import { IdempotencyRequestEntity } from '../../contexts/orders/adapters/outbound/idempotency-request.entity';
+import { PortfolioAccountEntity } from '../../contexts/portfolio/adapters/outbound/portfolio-account.entity';
+import { PortfolioPositionEntity } from '../../contexts/portfolio/adapters/outbound/portfolio-position.entity';
 
 const entities = [
   UserEntity,
@@ -13,6 +15,8 @@ const entities = [
   OrderEntity,
   MarketDataEntity,
   IdempotencyRequestEntity,
+  PortfolioAccountEntity,
+  PortfolioPositionEntity,
 ];
 
 @Module({

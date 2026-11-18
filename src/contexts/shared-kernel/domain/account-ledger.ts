@@ -95,3 +95,92 @@ export function calculateAccountLedger(
 
   return { cashBalanceCents, reservedCashCents, positions, reservedShares };
 }
+
+export function applyOrderToAccountLedger(
+  ledger: AccountLedger,
+  order: OrderRecord,
+  instruments: InstrumentRecord[],
+): void {
+  const size = BigInt(order.size);
+  const priceCents = order.price === null ? 0n : toCents(order.price);
+
+  if (order.status === OrderStatus.NEW) {
+    if (order.side === OrderSide.BUY) {
+      ledger.reservedCashCents += size * priceCents;
+    } else if (order.side === OrderSide.SELL) {
+      ledger.reservedShares.set(
+        order.instrumentId,
+        (ledger.reservedShares.get(order.instrumentId) ?? 0) + order.size,
+      );
+    }
+    return;
+  }
+
+  if (order.status === OrderStatus.CANCELLED) {
+    if (order.side === OrderSide.BUY) {
+      const reservedCash = size * priceCents;
+      if (ledger.reservedCashCents < reservedCash) {
+        throw new Error(`Insufficient reserved cash to cancel order ${order.id}`);
+      }
+      ledger.reservedCashCents -= reservedCash;
+    } else if (order.side === OrderSide.SELL) {
+      const reservedShares = ledger.reservedShares.get(order.instrumentId) ?? 0;
+      if (reservedShares < order.size) {
+        throw new Error(`Insufficient reserved shares to cancel order ${order.id}`);
+      }
+      ledger.reservedShares.set(
+        order.instrumentId,
+        reservedShares - order.size,
+      );
+    }
+    return;
+  }
+
+  if (order.status !== OrderStatus.FILLED) {
+    return;
+  }
+  if (order.side === OrderSide.CASH_IN) {
+    ledger.cashBalanceCents += size * 100n;
+    return;
+  }
+  if (order.side === OrderSide.CASH_OUT) {
+    ledger.cashBalanceCents -= size * 100n;
+    return;
+  }
+
+  const cashInstrumentId = instruments.find(
+    (instrument) => instrument.type === 'MONEDA',
+  )?.id;
+  if (order.instrumentId === cashInstrumentId) {
+    return;
+  }
+  if (order.side === OrderSide.BUY) {
+    ledger.cashBalanceCents -= size * priceCents;
+  } else if (order.side === OrderSide.SELL) {
+    ledger.cashBalanceCents += size * priceCents;
+  } else {
+    return;
+  }
+
+  const position = ledger.positions.get(order.instrumentId) ?? {
+    instrumentId: order.instrumentId,
+    quantity: 0,
+    costBasisCents: 0n,
+  };
+  if (order.side === OrderSide.BUY) {
+    position.quantity += order.size;
+    position.costBasisCents += size * priceCents;
+  } else {
+    const soldQuantity = Math.min(order.size, position.quantity);
+    if (soldQuantity === 0) {
+      return;
+    }
+    const allocatedCost = divideRounded(
+      position.costBasisCents * BigInt(soldQuantity),
+      BigInt(position.quantity),
+    );
+    position.quantity -= soldQuantity;
+    position.costBasisCents -= allocatedCost;
+  }
+  ledger.positions.set(order.instrumentId, position);
+}
