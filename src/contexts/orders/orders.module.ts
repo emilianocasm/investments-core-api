@@ -22,11 +22,18 @@ import {
 import { OrdersController } from './adapters/inbound/http/orders.controller';
 import { CashMovementsController } from './adapters/inbound/http/cash-movements.controller';
 import { OrdersAdapter } from './adapters/outbound/orders.adapter';
+import { IdempotencyRepositoryAdapter } from './adapters/outbound/idempotency-repository.adapter';
 import { OrderEntity } from './adapters/outbound/order.entity';
+import { IdempotencyRequestEntity } from './adapters/outbound/idempotency-request.entity';
+import { TransactionContext } from '../../infrastructure/database/transaction-context';
+import {
+  IDEMPOTENCY_REPOSITORY,
+  IdempotencyRepository,
+} from './application/ports/idempotency-repository.port';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([OrderEntity]),
+    TypeOrmModule.forFeature([OrderEntity, IdempotencyRequestEntity]),
     UsersModule,
     InstrumentsModule,
     MarketDataModule,
@@ -34,6 +41,12 @@ import { OrderEntity } from './adapters/outbound/order.entity';
   controllers: [OrdersController, CashMovementsController],
   providers: [
     OrdersAdapter,
+    IdempotencyRepositoryAdapter,
+    TransactionContext,
+    {
+      provide: IDEMPOTENCY_REPOSITORY,
+      useExisting: IdempotencyRepositoryAdapter,
+    },
     {
       provide: ORDERS_REPOSITORY,
       useExisting: OrdersAdapter,
@@ -45,14 +58,24 @@ import { OrderEntity } from './adapters/outbound/order.entity';
         users: UserReader,
         instruments: InstrumentCatalog,
         marketData: MarketDataReader,
+        idempotency: IdempotencyRepository,
       ) =>
-        new CreateOrderUseCase(orders, users, instruments, marketData),
-      inject: [ORDERS_REPOSITORY, USER_READER, INSTRUMENT_CATALOG, MARKET_DATA_READER],
+        new CreateOrderUseCase(orders, users, instruments, marketData, idempotency),
+      inject: [
+        ORDERS_REPOSITORY,
+        USER_READER,
+        INSTRUMENT_CATALOG,
+        MARKET_DATA_READER,
+        IDEMPOTENCY_REPOSITORY,
+      ],
     },
     {
       provide: CancelOrderUseCase,
-      useFactory: (orders: OrdersRepository) => new CancelOrderUseCase(orders),
-      inject: [ORDERS_REPOSITORY],
+      useFactory: (
+        orders: OrdersRepository,
+        idempotency: IdempotencyRepository,
+      ) => new CancelOrderUseCase(orders, idempotency),
+      inject: [ORDERS_REPOSITORY, IDEMPOTENCY_REPOSITORY],
     },
     {
       provide: CreateCashMovementUseCase,
@@ -60,8 +83,14 @@ import { OrderEntity } from './adapters/outbound/order.entity';
         orders: OrdersRepository,
         users: UserReader,
         instruments: InstrumentCatalog,
-      ) => new CreateCashMovementUseCase(orders, users, instruments),
-      inject: [ORDERS_REPOSITORY, USER_READER, INSTRUMENT_CATALOG],
+        idempotency: IdempotencyRepository,
+      ) => new CreateCashMovementUseCase(orders, users, instruments, idempotency),
+      inject: [
+        ORDERS_REPOSITORY,
+        USER_READER,
+        INSTRUMENT_CATALOG,
+        IDEMPOTENCY_REPOSITORY,
+      ],
     },
   ],
   exports: [ORDERS_REPOSITORY],

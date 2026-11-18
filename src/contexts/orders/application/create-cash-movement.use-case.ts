@@ -8,6 +8,8 @@ import { InstrumentCatalog } from '../../instruments/application/ports/instrumen
 import { UserReader } from '../../users/application/ports/user-reader.port';
 import { OrderRecord, OrderSide, OrderStatus, OrderType } from '../domain/order';
 import { OrdersRepository } from './ports/orders-repository.port';
+import { IdempotencyRepository } from './ports/idempotency-repository.port';
+import { createIdempotencyRequest } from './idempotency-request';
 
 export interface CreateCashMovementCommand {
   userId: number;
@@ -25,10 +27,24 @@ export class CreateCashMovementUseCase {
     private readonly orders: OrdersRepository,
     private readonly users: UserReader,
     private readonly instruments: InstrumentCatalog,
+    private readonly idempotency: IdempotencyRepository,
   ) {}
 
-  async execute(
+  execute(
     command: CreateCashMovementCommand,
+    idempotencyKey?: string,
+  ): Promise<CreateCashMovementResult> {
+    const idempotencyRequest = createIdempotencyRequest(
+      idempotencyKey,
+      'POST /cash-movements',
+      command,
+    );
+    return this.create(command, idempotencyRequest);
+  }
+
+  private async create(
+    command: CreateCashMovementCommand,
+    idempotencyRequest: ReturnType<typeof createIdempotencyRequest>,
   ): Promise<CreateCashMovementResult> {
     if (
       !Number.isInteger(command.amount) ||
@@ -81,17 +97,19 @@ export class CreateCashMovementUseCase {
         ? 'Insufficient available cash'
         : undefined;
 
-    const order = await this.orders.save({
-      instrumentId: cashInstrument.id,
-      userId: command.userId,
-      size: command.amount,
-      price: '1.00',
-      side: command.side,
-      status: rejectionReason ? OrderStatus.REJECTED : OrderStatus.FILLED,
-      type: OrderType.MARKET,
-      datetime: new Date().toISOString(),
-    });
+    return this.idempotency.saveTransactional(idempotencyRequest, async () => {
+      const order = await this.orders.save({
+        instrumentId: cashInstrument.id,
+        userId: command.userId,
+        size: command.amount,
+        price: '1.00',
+        side: command.side,
+        status: rejectionReason ? OrderStatus.REJECTED : OrderStatus.FILLED,
+        type: OrderType.MARKET,
+        datetime: new Date().toISOString(),
+      });
 
-    return rejectionReason ? { order, rejectionReason } : { order };
+      return rejectionReason ? { order, rejectionReason } : { order };
+    });
   }
 }

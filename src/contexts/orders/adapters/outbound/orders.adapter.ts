@@ -4,21 +4,23 @@ import { Repository } from 'typeorm';
 import { OrdersRepository } from '../../application/ports/orders-repository.port';
 import { OrderRecord, OrderStatus } from '../../domain/order';
 import { OrderEntity } from './order.entity';
+import { TransactionContext } from '../../../../infrastructure/database/transaction-context';
 
 @Injectable()
 export class OrdersAdapter implements OrdersRepository {
   constructor(
     @InjectRepository(OrderEntity)
     private readonly orders: Repository<OrderEntity>,
+    private readonly transactions: TransactionContext,
   ) {}
 
   async findById(id: number): Promise<OrderRecord | undefined> {
-    const order = await this.orders.findOneBy({ id });
+    const order = await this.repository().findOneBy({ id });
     return order ? this.toRecord(order) : undefined;
   }
 
   async findByUser(userId: number): Promise<OrderRecord[]> {
-    const orders = await this.orders.find({
+    const orders = await this.repository().find({
       where: { userId },
       order: { datetime: 'ASC', id: 'ASC' },
     });
@@ -26,8 +28,9 @@ export class OrdersAdapter implements OrdersRepository {
   }
 
   async save(order: Omit<OrderRecord, 'id'>): Promise<OrderRecord> {
-    const savedOrder = await this.orders.save(
-      this.orders.create({
+    const repository = this.repository();
+    const savedOrder = await repository.save(
+      repository.create({
         ...order,
         datetime: new Date(order.datetime),
       }),
@@ -39,7 +42,7 @@ export class OrdersAdapter implements OrdersRepository {
     id: number,
     status: OrderStatus,
   ): Promise<OrderRecord | undefined> {
-    const result = await this.orders.update({ id }, { status });
+    const result = await this.repository().update({ id }, { status });
     return result.affected ? this.findById(id) : undefined;
   }
 
@@ -67,5 +70,11 @@ export class OrdersAdapter implements OrdersRepository {
       status: order.status,
       datetime: order.datetime.toISOString(),
     };
+  }
+
+  private repository(): Repository<OrderEntity> {
+    return (
+      this.transactions.getManager()?.getRepository(OrderEntity) ?? this.orders
+    );
   }
 }

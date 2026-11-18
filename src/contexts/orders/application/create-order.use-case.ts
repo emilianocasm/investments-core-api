@@ -14,6 +14,8 @@ import {
 import { calculateAccountLedger } from '../../shared-kernel/domain/account-ledger';
 import { formatCents, toCents } from '../../shared-kernel/domain/money';
 import { OrdersRepository } from './ports/orders-repository.port';
+import { IdempotencyRepository } from './ports/idempotency-repository.port';
+import { createIdempotencyRequest } from './idempotency-request';
 
 export interface CreateOrderCommand {
   userId: number;
@@ -36,9 +38,25 @@ export class CreateOrderUseCase {
     private readonly users: UserReader,
     private readonly instruments: InstrumentCatalog,
     private readonly marketData: MarketDataReader,
+    private readonly idempotency: IdempotencyRepository,
   ) {}
 
-  async execute(command: CreateOrderCommand): Promise<CreateOrderResult> {
+  execute(
+    command: CreateOrderCommand,
+    idempotencyKey?: string,
+  ): Promise<CreateOrderResult> {
+    const idempotencyRequest = createIdempotencyRequest(
+      idempotencyKey,
+      'POST /orders',
+      command,
+    );
+    return this.create(command, idempotencyRequest);
+  }
+
+  private async create(
+    command: CreateOrderCommand,
+    idempotencyRequest: ReturnType<typeof createIdempotencyRequest>,
+  ): Promise<CreateOrderResult> {
     if ((command.size === undefined) === (command.amount === undefined)) {
       throw new ApplicationError(
         ApplicationErrorCode.INVALID_INPUT,
@@ -138,24 +156,26 @@ export class CreateOrderUseCase {
       currentShares - reservedShares,
       requestedAmountCents,
     );
-    const savedOrder = await this.orders.save({
-      instrumentId: command.instrumentId,
-      userId: command.userId,
-      size,
-      price: orderPrice,
-      side: command.side,
-      status: rejectionReason
-        ? OrderStatus.REJECTED
-        : command.type === OrderType.MARKET
-          ? OrderStatus.FILLED
-          : OrderStatus.NEW,
-      type: command.type,
-      datetime: new Date().toISOString(),
-    });
+    return this.idempotency.saveTransactional(idempotencyRequest, async () => {
+      const savedOrder = await this.orders.save({
+        instrumentId: command.instrumentId,
+        userId: command.userId,
+        size,
+        price: orderPrice,
+        side: command.side,
+        status: rejectionReason
+          ? OrderStatus.REJECTED
+          : command.type === OrderType.MARKET
+            ? OrderStatus.FILLED
+            : OrderStatus.NEW,
+        type: command.type,
+        datetime: new Date().toISOString(),
+      });
 
-    return rejectionReason
-      ? { order: savedOrder, rejectionReason }
-      : { order: savedOrder };
+      return rejectionReason
+        ? { order: savedOrder, rejectionReason }
+        : { order: savedOrder };
+    });
   }
 
   private getRejectionReason(

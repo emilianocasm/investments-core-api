@@ -8,6 +8,7 @@ import * as seed from '../fixtures/investment-data.json';
 import { InstrumentEntity } from '../../src/contexts/instruments/adapters/outbound/instrument.entity';
 import { MarketDataEntity } from '../../src/contexts/market-data/adapters/outbound/market-data.entity';
 import { OrderEntity } from '../../src/contexts/orders/adapters/outbound/order.entity';
+import { IdempotencyRequestEntity } from '../../src/contexts/orders/adapters/outbound/idempotency-request.entity';
 import {
   OrderSide,
   OrderStatus,
@@ -16,6 +17,9 @@ import {
 import { UserEntity } from '../../src/contexts/users/adapters/outbound/user.entity';
 
 const TEST_API_KEY = 'test-api-key-for-functional-tests';
+const TEST_KSUID_ALPHABET =
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+let testKsuidSequence = 0;
 
 export interface TestApiApp {
   baseUrl: string;
@@ -37,6 +41,15 @@ export async function createTestApiApp(): Promise<TestApiApp> {
     throw new Error('Order datetime column metadata was not registered');
   }
   datetimeColumn.options.type = 'datetime';
+  const idempotencyCreatedAt = getMetadataArgsStorage().columns.find(
+    (column) =>
+      column.target === IdempotencyRequestEntity &&
+      column.propertyName === 'createdAt',
+  );
+  if (!idempotencyCreatedAt) {
+    throw new Error('Idempotency createdAt column metadata was not registered');
+  }
+  idempotencyCreatedAt.options.type = 'datetime';
 
   const app = await NestFactory.create(AppModule, { logger: false });
   const dataSource = app.get(DataSource);
@@ -49,6 +62,7 @@ export async function createTestApiApp(): Promise<TestApiApp> {
     await marketData.save(seed.marketData);
   };
   const resetOrders = async (): Promise<void> => {
+    await dataSource.getRepository(IdempotencyRequestEntity).clear();
     const orders = dataSource.getRepository(OrderEntity);
     await orders.clear();
     await orders.save(
@@ -84,6 +98,12 @@ export async function createTestApiApp(): Promise<TestApiApp> {
     request: (path, init) => {
       const headers = new Headers(init?.headers);
       headers.set('x-api-key', TEST_API_KEY);
+      if (init?.method?.toUpperCase() === 'POST' && !headers.has('idempotency-key')) {
+        const suffix =
+          TEST_KSUID_ALPHABET[testKsuidSequence % TEST_KSUID_ALPHABET.length];
+        testKsuidSequence += 1;
+        headers.set('idempotency-key', `${'0'.repeat(26)}${suffix}`);
+      }
       return fetch(`http://127.0.0.1:${address.port}/api/v1${path}`, {
         ...init,
         headers,

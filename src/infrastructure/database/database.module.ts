@@ -5,8 +5,15 @@ import { MarketDataEntity } from '../../contexts/market-data/adapters/outbound/m
 import { OrderEntity } from '../../contexts/orders/adapters/outbound/order.entity';
 import { InstrumentEntity } from '../../contexts/instruments/adapters/outbound/instrument.entity';
 import { UserEntity } from '../../contexts/users/adapters/outbound/user.entity';
+import { IdempotencyRequestEntity } from '../../contexts/orders/adapters/outbound/idempotency-request.entity';
 
-const entities = [UserEntity, InstrumentEntity, OrderEntity, MarketDataEntity];
+const entities = [
+  UserEntity,
+  InstrumentEntity,
+  OrderEntity,
+  MarketDataEntity,
+  IdempotencyRequestEntity,
+];
 
 @Module({
   imports: [

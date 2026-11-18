@@ -1,8 +1,10 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Headers, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBody,
   ApiCreatedResponse,
+  ApiConflictResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOperation,
   ApiTags,
@@ -23,6 +25,13 @@ export class CashMovementsController {
     summary: 'Ingresar o retirar efectivo',
     description:
       'Registra CASH_IN o CASH_OUT como un movimiento FILLED en orders, asociado al instrumento de moneda ARS. Los retiros que exceden el efectivo disponible, descontando reservas, se guardan como REJECTED.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      'KSUID único para esta operación; reutilizarlo solo al reintentar la misma solicitud.',
+    example: '0ujsswThIGTUYm2K8FjOOfXtY1K',
   })
   @ApiBody({ type: CreateCashMovementDto })
   @ApiCreatedResponse({
@@ -109,13 +118,22 @@ export class CashMovementsController {
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'Datos inválidos.' })
+  @ApiBadRequestResponse({
+    description: 'Datos inválidos o Idempotency-Key ausente o inválida.',
+  })
   @ApiNotFoundResponse({ description: 'El usuario no existe.' })
+  @ApiConflictResponse({
+    description:
+      'La clave ya se usó con otra solicitud o una solicitud con esa clave sigue en proceso.',
+  })
   @ApiUnauthorizedResponse({ description: 'API key ausente o inválida.' })
   @ApiInternalServerErrorResponse({
     description: 'Error interno al registrar el movimiento.',
   })
-  create(@Body() dto: CreateCashMovementDto) {
-    return this.createCashMovement.execute(dto);
+  create(
+    @Body() dto: CreateCashMovementDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.createCashMovement.execute(dto, idempotencyKey);
   }
 }

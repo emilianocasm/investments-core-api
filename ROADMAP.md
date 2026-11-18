@@ -2,10 +2,18 @@
 
 Este documento describe mejoras posibles para futuras versiones. Las prioridades y fechas pueden cambiar según las necesidades del producto y el crecimiento de la plataforma.
 
-## v1 — Optimización de búsqueda de instrumentos
+## Escalabilidad — Cálculo de portfolio
 
-- Evaluar y crear índices B-tree para `instruments.ticker` y `instruments.name` para acelerar las búsquedas por coincidencia exacta.
-- Revisar los planes de ejecución con datos representativos para validar el uso de los índices.
+Actualmente, cada consulta del portfolio carga el historial de órdenes del usuario y reconstruye desde cero el saldo de efectivo, las posiciones, los costos promedio y las reservas de efectivo o acciones. Este enfoque es simple y mantiene el historial como fuente de verdad, pero su costo crece con la cantidad de órdenes y obliga a recorrer registros que ya se procesaron en consultas anteriores.
+
+Para historiales grandes, evaluar mantener saldos y posiciones materializados o actualizados incrementalmente a medida que se crean, ejecutan, rechazan o cancelan órdenes y movimientos de efectivo. La solución debe preservar la consistencia entre las órdenes y el estado derivado, idealmente actualizándolos en la misma transacción, y contemplar:
+
+- Definir qué datos se materializan por usuario y por instrumento: efectivo, cantidad disponible, cantidad reservada, costo total y costo promedio.
+- Mantener las órdenes como fuente de verdad y establecer cómo reconstruir o reconciliar el estado materializado si hay una inconsistencia.
+- Actualizar el estado derivado de forma atómica para cada transición de orden (`NEW`, `FILLED`, `REJECTED`, `CANCELLED`) y para movimientos `CASH_IN`/`CASH_OUT`, evitando aplicar dos veces una transición reintentada.
+- Diseñar el manejo de concurrencia para operaciones simultáneas del mismo usuario, de modo que no se gasten dos veces el mismo efectivo o las mismas acciones.
+- Crear una migración inicial que calcule los saldos y posiciones desde el historial existente, y definir un procedimiento de verificación y reversión.
+- Comparar el resultado con el cálculo actual del ledger mediante pruebas de equivalencia y mediciones con historiales representativos.
 
 ## Evolución del modelo de monedas y efectivo
 

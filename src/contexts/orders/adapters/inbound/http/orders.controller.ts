@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Headers,
   Param,
   ParseIntPipe,
   Post,
@@ -10,6 +11,7 @@ import {
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOperation,
   ApiParam,
@@ -36,6 +38,12 @@ export class OrdersController {
     summary: 'Enviar una orden de compra o venta',
     description:
       'Indicar exactamente uno de size o amount. MARKET toma el último close y se ejecuta inmediatamente; LIMIT requiere price y queda NEW. Órdenes sin fondos o acciones suficientes se persisten como REJECTED.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'KSUID único para esta operación; reutilizarlo solo al reintentar la misma solicitud.',
+    example: '0ujsswThIGTUYm2K8FjOOfXtY1K',
   })
   @ApiBody({ type: CreateOrderDto })
   @ApiCreatedResponse({
@@ -164,21 +172,35 @@ export class OrdersController {
     },
   })
   @ApiBadRequestResponse({
-    description: 'Datos inválidos o combinación de parámetros incorrecta.',
+    description:
+      'Datos inválidos o combinación de parámetros incorrecta; Idempotency-Key ausente o inválida.',
   })
   @ApiNotFoundResponse({ description: 'Usuario o instrumento no encontrado.' })
+  @ApiConflictResponse({
+    description:
+      'La clave ya se usó con otra solicitud o una solicitud con esa clave sigue en proceso.',
+  })
   @ApiUnauthorizedResponse({ description: 'API key ausente o inválida.' })
   @ApiInternalServerErrorResponse({
     description: 'Error interno al registrar la orden.',
   })
-  create(@Body() dto: CreateOrderDto) {
-    return this.createOrder.execute(dto);
+  create(
+    @Body() dto: CreateOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.createOrder.execute(dto, idempotencyKey);
   }
 
   @Post(':orderId/cancel')
   @ApiOperation({
     summary: 'Cancelar una orden pendiente',
     description: 'Solo permite cancelar órdenes NEW pertenecientes al usuario indicado.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'KSUID único para esta operación; reutilizarlo solo al reintentar la misma solicitud.',
+    example: '0ujsswThIGTUYm2K8FjOOfXtY1K',
   })
   @ApiParam({
     name: 'orderId',
@@ -204,14 +226,21 @@ export class OrdersController {
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'El ID o el cuerpo de la solicitud es inválido.' })
+  @ApiBadRequestResponse({
+    description:
+      'El ID, el cuerpo de la solicitud o la Idempotency-Key es inválida.',
+  })
   @ApiNotFoundResponse({ description: 'La orden no existe o no pertenece al usuario.' })
-  @ApiConflictResponse({ description: 'Solo se pueden cancelar órdenes NEW.' })
+  @ApiConflictResponse({
+    description:
+      'Solo se pueden cancelar órdenes NEW; también se devuelve si la clave idempotente se reutiliza incorrectamente o sigue en proceso.',
+  })
   @ApiUnauthorizedResponse({ description: 'API key ausente o inválida.' })
   cancel(
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: CancelOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
-    return this.cancelOrder.execute(orderId, dto.userId);
+    return this.cancelOrder.execute(orderId, dto.userId, idempotencyKey);
   }
 }

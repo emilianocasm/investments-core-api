@@ -4,6 +4,8 @@ import {
 } from './support/api-test-app';
 import { MarketDataEntity } from '../src/contexts/market-data/adapters/outbound/market-data.entity';
 import { OrderEntity } from '../src/contexts/orders/adapters/outbound/order.entity';
+import { OrderSide } from '../src/contexts/orders/domain/order';
+import { IdempotencyRequestEntity } from '../src/contexts/orders/adapters/outbound/idempotency-request.entity';
 
 describe('Orders and cash movement endpoints', () => {
   let api: TestApiApp;
@@ -57,22 +59,31 @@ describe('Orders and cash movement endpoints', () => {
   });
 
   it('fills MARKET buys at the latest close and updates the portfolio position', async () => {
-    const response = await api.request('/orders', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
+    const key = `${'0'.repeat(26)}D`;
+    const request = () =>
+      api.request('/orders', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({
         userId: 1,
         instrumentId: 33,
         type: 'MARKET',
         side: 'BUY',
         amount: 1000,
-      }),
-    });
+        }),
+      });
+    const response = await request();
     const result = (await response.json()) as {
       order: { size: number; price: string; status: string };
     };
+    const replay = await request();
 
     expect(response.status).toBe(201);
+    expect(replay.status).toBe(201);
+    await expect(replay.json()).resolves.toEqual(result);
     expect(result.order).toEqual(
       expect.objectContaining({ size: 2, price: '414.70', status: 'FILLED' }),
     );
@@ -98,6 +109,7 @@ describe('Orders and cash movement endpoints', () => {
         amount: 627501,
       }),
     });
+
     const rejectedBuy = (await insufficientCash.json()) as {
       order: { id: number; status: string };
       rejectionReason: string;
@@ -132,6 +144,80 @@ describe('Orders and cash movement endpoints', () => {
         .getRepository(OrderEntity)
         .findOneBy({ id: rejectedSell.order.id }),
     ).resolves.toEqual(expect.objectContaining({ status: 'REJECTED' }));
+  });
+
+  it('replays the original response for an identical idempotent cash movement', async () => {
+    const key = `${'0'.repeat(26)}A`;
+    const request = () =>
+      api.request('/cash-movements', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({ userId: 1, side: 'CASH_IN', amount: 1000 }),
+      });
+
+    const first = await request();
+    const firstBody = await first.json();
+    const replay = await request();
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    await expect(replay.json()).resolves.toEqual(firstBody);
+    await expect(
+      api.dataSource.getRepository(IdempotencyRequestEntity).count(),
+    ).resolves.toBe(1);
+  });
+
+  it('rejects reusing an idempotency key with a different request', async () => {
+    const key = `${'0'.repeat(26)}B`;
+    const first = await api.request('/cash-movements', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': key,
+      },
+      body: JSON.stringify({ userId: 1, side: 'CASH_IN', amount: 1000 }),
+    });
+    expect(first.status).toBe(201);
+
+    const reused = await api.request('/cash-movements', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': key,
+      },
+      body: JSON.stringify({ userId: 1, side: 'CASH_IN', amount: 2000 }),
+    });
+
+    expect(reused.status).toBe(409);
+    await expect(reused.json()).resolves.toEqual(
+      expect.objectContaining({
+        message: 'The Idempotency-Key was already used with a different request',
+      }),
+    );
+    await expect(
+      api.dataSource.getRepository(IdempotencyRequestEntity).count(),
+    ).resolves.toBe(1);
+  });
+
+  it('requires a valid KSUID idempotency key for POST requests', async () => {
+    for (const key of ['', 'not-a-ksuid', '0'.repeat(28)]) {
+      const response = await api.request('/cash-movements', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': key,
+        },
+        body: JSON.stringify({ userId: 1, side: 'CASH_IN', amount: 1000 }),
+      });
+      expect(response.status).toBe(400);
+    }
+
+    await expect(
+      api.dataSource.getRepository(IdempotencyRequestEntity).count(),
+    ).resolves.toBe(0);
   });
 
   it('rejects an amount that cannot buy one whole share', async () => {
@@ -295,18 +381,28 @@ describe('Orders and cash movement endpoints', () => {
     );
     expect(wrongOwner.status).toBe(404);
 
-    const cancelled = await api.request(
+    const cancellationKey = `${'0'.repeat(26)}C`;
+    const cancellationRequest = () =>
+      api.request(
       `/orders/${created.order.id}/cancel`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': cancellationKey,
+        },
         body: JSON.stringify({ userId: 1 }),
       },
     );
+    const cancelled = await cancellationRequest();
     expect(cancelled.status).toBe(201);
-    await expect(cancelled.json()).resolves.toEqual(
+    const cancelledBody = await cancelled.json();
+    expect(cancelledBody).toEqual(
       expect.objectContaining({ status: 'CANCELLED' }),
     );
+    const cancellationReplay = await cancellationRequest();
+    expect(cancellationReplay.status).toBe(201);
+    await expect(cancellationReplay.json()).resolves.toEqual(cancelledBody);
 
     const portfolio = await api.request('/portfolio/1');
     await expect(portfolio.json()).resolves.toEqual(
@@ -474,6 +570,9 @@ describe('Orders and cash movement endpoints', () => {
       body: JSON.stringify({ userId: 999, side: 'CASH_IN', amount: 100 }),
     });
     expect(missingUser.status).toBe(404);
+    await expect(
+      api.dataSource.getRepository(IdempotencyRequestEntity).count(),
+    ).resolves.toBe(0);
   });
 
   it('does not let cash withdrawals use funds reserved by pending orders', async () => {
