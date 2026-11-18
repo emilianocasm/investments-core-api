@@ -16,3 +16,10 @@ El esquema actual representa ARS como un registro de `instruments` de tipo `MONE
 
 - Monitorear el volumen de registros de `instruments` y el rendimiento de las consultas.
 - Si el crecimiento del catálogo y la carga de lectura/escritura lo justifican, diseñar una estrategia de particionado horizontal (sharding) para la tabla `instruments`. Definir la clave y el mecanismo de distribución a partir de los patrones de acceso y evaluar su impacto en consultas, índices y operaciones entre particiones.
+
+## Observabilidad — APM y monitoreo
+
+- Evaluar integrar una plataforma de observabilidad como New Relic para centralizar métricas, logs, trazas distribuidas y alertas de la API y la base de datos.
+- Instrumentar latencia y tasa de errores por endpoint, consultas y transacciones de PostgreSQL, bloqueos por usuario y operaciones del cálculo de portfolio; definir dashboards y umbrales de alerta acordes a los objetivos de servicio.
+- Una plataforma APM unificada permite correlacionar una solicitud con sus trazas, métricas y logs, identificar con más rapidez si una degradación proviene de la aplicación o de la base de datos y detectar tendencias antes de que se conviertan en incidentes. Frente a revisar logs aislados, esto reduce el tiempo de diagnóstico y aporta contexto para priorizar optimizaciones.
+- Comparar costo, retención, cobertura de instrumentación y facilidad de integración de New Relic con alternativas antes de elegir; evitar registrar credenciales, claves de API o datos personales sensibles.
