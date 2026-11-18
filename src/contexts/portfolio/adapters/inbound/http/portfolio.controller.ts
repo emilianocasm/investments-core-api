@@ -17,7 +17,7 @@ export class PortfolioController {
   @ApiOperation({
     summary: 'Consultar la cartera de un usuario',
     description:
-      'Calcula el efectivo y las posiciones a partir de órdenes FILLED, y reserva efectivo/acciones por órdenes NEW.',
+      'Devuelve efectivo y posiciones materializados desde las órdenes FILLED, junto con las reservas de órdenes NEW.',
   })
   @ApiParam({
     name: 'userId',

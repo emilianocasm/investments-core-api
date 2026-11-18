@@ -25,7 +25,8 @@ import { OrdersAdapter } from './adapters/outbound/orders.adapter';
 import { IdempotencyRepositoryAdapter } from './adapters/outbound/idempotency-repository.adapter';
 import { OrderEntity } from './adapters/outbound/order.entity';
 import { IdempotencyRequestEntity } from './adapters/outbound/idempotency-request.entity';
-import { TransactionContext } from '../../infrastructure/database/transaction-context';
+import { PortfolioStateModule } from '../portfolio/portfolio-state.module';
+import { ACCOUNT_STATE_REPOSITORY, AccountStateRepository } from '../shared-kernel/application/ports/account-state-repository.port';
 import {
   IDEMPOTENCY_REPOSITORY,
   IdempotencyRepository,
@@ -37,12 +38,12 @@ import {
     UsersModule,
     InstrumentsModule,
     MarketDataModule,
+    PortfolioStateModule,
   ],
   controllers: [OrdersController, CashMovementsController],
   providers: [
     OrdersAdapter,
     IdempotencyRepositoryAdapter,
-    TransactionContext,
     {
       provide: IDEMPOTENCY_REPOSITORY,
       useExisting: IdempotencyRepositoryAdapter,
@@ -59,14 +60,16 @@ import {
         instruments: InstrumentCatalog,
         marketData: MarketDataReader,
         idempotency: IdempotencyRepository,
+        accountState: AccountStateRepository,
       ) =>
-        new CreateOrderUseCase(orders, users, instruments, marketData, idempotency),
+        new CreateOrderUseCase(orders, users, instruments, marketData, idempotency, accountState),
       inject: [
         ORDERS_REPOSITORY,
         USER_READER,
         INSTRUMENT_CATALOG,
         MARKET_DATA_READER,
         IDEMPOTENCY_REPOSITORY,
+        ACCOUNT_STATE_REPOSITORY,
       ],
     },
     {
@@ -74,8 +77,9 @@ import {
       useFactory: (
         orders: OrdersRepository,
         idempotency: IdempotencyRepository,
-      ) => new CancelOrderUseCase(orders, idempotency),
-      inject: [ORDERS_REPOSITORY, IDEMPOTENCY_REPOSITORY],
+        accountState: AccountStateRepository,
+      ) => new CancelOrderUseCase(orders, idempotency, accountState),
+      inject: [ORDERS_REPOSITORY, IDEMPOTENCY_REPOSITORY, ACCOUNT_STATE_REPOSITORY],
     },
     {
       provide: CreateCashMovementUseCase,
@@ -84,12 +88,14 @@ import {
         users: UserReader,
         instruments: InstrumentCatalog,
         idempotency: IdempotencyRepository,
-      ) => new CreateCashMovementUseCase(orders, users, instruments, idempotency),
+        accountState: AccountStateRepository,
+      ) => new CreateCashMovementUseCase(orders, users, instruments, idempotency, accountState),
       inject: [
         ORDERS_REPOSITORY,
         USER_READER,
         INSTRUMENT_CATALOG,
         IDEMPOTENCY_REPOSITORY,
+        ACCOUNT_STATE_REPOSITORY,
       ],
     },
   ],

@@ -1,4 +1,5 @@
 import { createTestApiApp, TestApiApp } from './support/api-test-app';
+import { maintainPortfolioState } from '../src/infrastructure/database/portfolio-state-maintenance';
 
 describe('Portfolio endpoint', () => {
   let api: TestApiApp;
@@ -12,6 +13,7 @@ describe('Portfolio endpoint', () => {
   });
 
   it('calculates cash, pending reservations, positions, market value and returns', async () => {
+    await maintainPortfolioState(api.dataSource, true);
     const response = await api.request('/portfolio/1');
     const portfolio = (await response.json()) as {
       userId: number;

@@ -6,7 +6,7 @@ import {
   InstrumentRecord,
   MarketDataRecord,
 } from '../../shared-kernel/domain/investment-records';
-import { calculateAccountLedger } from '../../shared-kernel/domain/account-ledger';
+import { AccountStateRepository } from '../../shared-kernel/application/ports/account-state-repository.port';
 import {
   divideRounded,
   formatCents,
@@ -15,7 +15,6 @@ import {
 } from '../../shared-kernel/domain/money';
 import { InstrumentCatalog } from '../../instruments/application/ports/instrument-catalog.port';
 import { MarketDataReader } from '../../market-data/application/ports/market-data-reader.port';
-import { OrdersRepository } from '../../orders/application/ports/orders-repository.port';
 import { UserReader } from '../../users/application/ports/user-reader.port';
 
 export class GetPortfolioUseCase {
@@ -23,7 +22,7 @@ export class GetPortfolioUseCase {
     private readonly users: UserReader,
     private readonly instruments: InstrumentCatalog,
     private readonly marketData: MarketDataReader,
-    private readonly orders: OrdersRepository,
+    private readonly accountState: AccountStateRepository,
   ) {}
 
   async execute(userId: number) {
@@ -34,20 +33,15 @@ export class GetPortfolioUseCase {
       );
     }
 
-    const [instruments, orders] = await Promise.all([
-      this.instruments.search(),
-      this.orders.findByUser(userId),
-    ]);
-    const ledger = calculateAccountLedger(userId, orders, instruments);
-    const instrumentById = new Map<number, InstrumentRecord>(
-      instruments.map((instrument) => [instrument.id, instrument]),
-    );
+    const ledger = await this.accountState.findByUser(userId);
     const positions = await Promise.all(
       [...ledger.positions.values()]
         .filter((position) => position.quantity > 0)
         .map(async (position) => {
-          const instrument = instrumentById.get(position.instrumentId);
-          const quote = await this.marketData.getLatest(position.instrumentId);
+          const [instrument, quote] = await Promise.all([
+            this.instruments.findById(position.instrumentId),
+            this.marketData.getLatest(position.instrumentId),
+          ]);
 
           if (!instrument || instrument.type === 'MONEDA') {
             throw new ApplicationError(

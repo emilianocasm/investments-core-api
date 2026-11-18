@@ -11,7 +11,8 @@ import {
   OrderStatus,
   OrderType,
 } from '../domain/order';
-import { calculateAccountLedger } from '../../shared-kernel/domain/account-ledger';
+import { applyOrderToAccountLedger } from '../../shared-kernel/domain/account-ledger';
+import { AccountStateRepository } from '../../shared-kernel/application/ports/account-state-repository.port';
 import { formatCents, toCents } from '../../shared-kernel/domain/money';
 import { OrdersRepository } from './ports/orders-repository.port';
 import { IdempotencyRepository } from './ports/idempotency-repository.port';
@@ -39,6 +40,7 @@ export class CreateOrderUseCase {
     private readonly instruments: InstrumentCatalog,
     private readonly marketData: MarketDataReader,
     private readonly idempotency: IdempotencyRepository,
+    private readonly accountState: AccountStateRepository,
   ) {}
 
   execute(
@@ -141,22 +143,23 @@ export class CreateOrderUseCase {
         ? 0
         : Number(calculatedSize));
     const orderPrice = formatCents(priceCents);
-    const [userOrders, instruments] = await Promise.all([
-      this.orders.findByUser(command.userId),
-      this.instruments.search(),
-    ]);
-    const ledger = calculateAccountLedger(command.userId, userOrders, instruments);
-    const currentShares = ledger.positions.get(command.instrumentId)?.quantity ?? 0;
-    const reservedShares = ledger.reservedShares.get(command.instrumentId) ?? 0;
-    const rejectionReason = this.getRejectionReason(
-      command,
-      size,
-      priceCents,
-      ledger.cashBalanceCents - ledger.reservedCashCents,
-      currentShares - reservedShares,
-      requestedAmountCents,
-    );
+    const instruments = await this.instruments.search();
     return this.idempotency.saveTransactional(idempotencyRequest, async () => {
+      await this.accountState.lockUser(command.userId);
+      const ledger = await this.accountState.findByUser(
+        command.userId,
+        command.instrumentId,
+      );
+      const currentShares = ledger.positions.get(command.instrumentId)?.quantity ?? 0;
+      const reservedShares = ledger.reservedShares.get(command.instrumentId) ?? 0;
+      const rejectionReason = this.getRejectionReason(
+        command,
+        size,
+        priceCents,
+        ledger.cashBalanceCents - ledger.reservedCashCents,
+        currentShares - reservedShares,
+        requestedAmountCents,
+      );
       const savedOrder = await this.orders.save({
         instrumentId: command.instrumentId,
         userId: command.userId,
@@ -171,6 +174,17 @@ export class CreateOrderUseCase {
         type: command.type,
         datetime: new Date().toISOString(),
       });
+
+      if (!rejectionReason) {
+        applyOrderToAccountLedger(ledger, savedOrder, instruments);
+        await this.accountState.save(
+          command.userId,
+          ledger,
+          savedOrder.side === OrderSide.BUY || savedOrder.side === OrderSide.SELL
+            ? savedOrder.instrumentId
+            : null,
+        );
+      }
 
       return rejectionReason
         ? { order: savedOrder, rejectionReason }

@@ -15,6 +15,7 @@ import {
   OrderType,
 } from '../../src/contexts/orders/domain/order';
 import { UserEntity } from '../../src/contexts/users/adapters/outbound/user.entity';
+import { maintainPortfolioState } from '../../src/infrastructure/database/portfolio-state-maintenance';
 
 const TEST_API_KEY = 'test-api-key-for-functional-tests';
 const TEST_KSUID_ALPHABET =
@@ -74,6 +75,7 @@ export async function createTestApiApp(): Promise<TestApiApp> {
         datetime: new Date(order.datetime),
       })),
     );
+    await maintainPortfolioState(dataSource);
   };
 
   await resetMarketData();
